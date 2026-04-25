@@ -1,6 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 
 class FetchingData:
@@ -73,6 +73,9 @@ class FetchingData:
         date_string = date_string.replace(" ", "")
         date_time = datetime.strptime(date_string, '%dde%m%Y-%H:%M')
         print(f"Article date: {date_time}")
+        if date_time < datetime.now() - timedelta(days=7):
+            print("Article is older than current time for the last 7 days, skipping.")
+            return None
         # Extract the main content of the article
         content = []
         for paragraph in soup.find_all('p'):

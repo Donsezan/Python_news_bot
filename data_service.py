@@ -1,66 +1,47 @@
-import chromadb
-from chromadb.config import Settings
+import sqlite3
 import uuid
 from datetime import datetime, timedelta
 
 
 class DataService:
-    def __init__(self, chroma_db_path, DISTANCE_THRESHOLD):
-        self.distance_threshold = DISTANCE_THRESHOLD
-        self.client = chromadb.PersistentClient(path=chroma_db_path, settings=Settings())
-        self.collection = self.client.get_or_create_collection(name="malaga_news")
+    def __init__(self, db_path, DISTANCE_THRESHOLD):
+        self.similarity_threshold = 1 - DISTANCE_THRESHOLD
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn.execute(
+            'CREATE TABLE IF NOT EXISTS articles (id TEXT PRIMARY KEY, title TEXT, date TEXT)'
+        )
+        self.conn.commit()
+
+    def _jaccard(self, a, b):
+        ta, tb = set(a.lower().split()), set(b.lower().split())
+        if not ta or not tb:
+            return 0.0
+        return len(ta & tb) / len(ta | tb)
 
     def is_new_article(self, title):
         try:
-            results = self.collection.query(query_texts=[title], n_results=1)
-            distances = results.get('distances', [])
-            if not distances or not distances[0]:
-                return True
-            distance = distances[0][0]
-            if distance <= self.distance_threshold:
-                return False
+            for (stored,) in self.conn.execute('SELECT title FROM articles'):
+                if self._jaccard(title, stored) >= self.similarity_threshold:
+                    return False
             return True
         except Exception as e:
             print(f"Error checking for new article: {e}")
             return True
 
     def save_article(self, title, date_time):
-        try: 
-            doc_id = str(uuid.uuid4())
-            self.collection.add(
-                ids=[doc_id],
-                documents=[title],
-                metadatas=[{"date": date_time.isoformat()}]
-                )
-            print(f"Article '{title}' added to the database with ID {doc_id}.")
+        try:
+            self.conn.execute('INSERT INTO articles VALUES (?, ?, ?)',
+                              (str(uuid.uuid4()), title, date_time.isoformat()))
+            self.conn.commit()
+            print(f"Article '{title}' saved to database.")
         except Exception as e:
-            print(f"Error adding article '{title}' to the database: {e}")
+            print(f"Error saving article '{title}': {e}")
 
-    
     def cleanup_old_articles(self, max_age_days=10):
         try:
-            results = self.collection.get(include=["metadatas", "ids"])
-            if not results or "metadatas" not in results or "ids" not in results:
-                print("No articles found in the database.")
-                return
-            ids_to_delete = []
-            now = datetime.now()
-            cutoff = now - timedelta(days=max_age_days)
-            for doc_id, metadata in zip(results['ids'], results['metadatas']):
-                timestamp_str = metadata.get("date")
-                if not timestamp_str:
-                    continue
-                try:
-                    timestamp = datetime.fromisoformat(timestamp_str)
-                    if timestamp < cutoff:
-                        ids_to_delete.append(doc_id)
-                except ValueError:
-                    continue
-            if ids_to_delete:
-                self.collection.delete(ids=ids_to_delete)
-                self.client.persist()
-                print(f"Deleted {len(ids_to_delete)} old articles from the database.")
-            else:
-                print("No old articles to delete.")
+            cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+            cur = self.conn.execute('DELETE FROM articles WHERE date < ?', (cutoff,))
+            self.conn.commit()
+            print(f"Deleted {cur.rowcount} old articles from the database.")
         except Exception as e:
             print(f"Error cleaning up old articles: {e}")

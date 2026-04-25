@@ -1,33 +1,29 @@
-from openai import OpenAI
+import requests
 from ai.base_ai_service import BaseAIService
 import ai.ai_prompts as ai_prompts
 import response_parser
 
+_API_URL = "http://localhost:1234/v1/chat/completions"
+
+
 class OpenAIService(BaseAIService):
     def __init__(self):
-        self.client = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
+        self.headers = {"Authorization": "Bearer lm-studio", "Content-Type": "application/json"}
 
-    def _init_agent(self, messages, response_format={"type": "text"}, model="microsoft/phi-4-reasoning-plus"):
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            response_format=response_format,
-            temperature=0.7
-        )
-        return response
+    def _chat(self, messages, response_format={"type": "text"}, model="microsoft/phi-4-reasoning-plus"):
+        body = {"model": model, "messages": messages, "response_format": response_format, "temperature": 0.7}
+        resp = requests.post(_API_URL, json=body, headers=self.headers)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
 
     def summarize_with_emojis(self, article_text, target_language='en'):
-        system_prompt = ai_prompts.get_summarize_with_emojis_prompt(target_language)
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": ai_prompts.get_summarize_with_emojis_prompt(target_language)},
             {"role": "user", "content": article_text}
         ]
-        response = self._init_agent(messages)
-        summary = response.choices[0].message.content
-        return response_parser.parse_summary_with_emojis(summary)
+        return response_parser.parse_summary_with_emojis(self._chat(messages))
 
     def evaluate_article(self, article_text):
-        system_prompt = ai_prompts.get_evaluate_article_prompt()
         response_format = {
             "type": "json_schema",
             "json_schema": {
@@ -46,11 +42,8 @@ class OpenAIService(BaseAIService):
                 }
             }
         }
-
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": ai_prompts.get_evaluate_article_prompt()},
             {"role": "user", "content": article_text}
         ]
-        response = self._init_agent(messages, response_format=response_format)
-        full_response_text = response.choices[0].message.content
-        return response_parser.parse_evaluate_article(full_response_text)
+        return response_parser.parse_evaluate_article(self._chat(messages, response_format=response_format))
