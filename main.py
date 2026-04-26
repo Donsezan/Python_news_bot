@@ -46,7 +46,7 @@ telegram_service = TelegramService(BOT_TOKEN, CHAT_ID)
 ai_service = AIService.get_service(provider=current_ai_provider, gemini_api_key=GEMINI_API_KEY)
 
 
-def _with_retry(fn, retries=3, delay=60):
+def _with_retry(fn, retries=3, delay=180):
     for attempt in range(1, retries + 1):
         try:
             return fn()
@@ -90,7 +90,7 @@ def job(dry_run=False):
             continue
 
         print(f"Article score: {article_score}")
-        if article_score < 7:
+        if article_score < 6:
             print(f"Article '{title}' with score '{article_score}' does not meet the evaluation criteria. Skipping.")
             continue
 
@@ -99,11 +99,11 @@ def job(dry_run=False):
 
         if not dry_run:
             print("Posting to Telegram...")
-            # result_of_post = telegram_service.post_to_telegram(f"<b>{title}</b>\n\n{evaluated_content}", images, href)
-            # if not result_of_post:
-            #     print(f"Failed to post article '{title}' to Telegram.")
-            #     continue
-        time.sleep(60)
+            result_of_post = telegram_service.post_to_telegram(f"<b>{title}</b>\n\n{evaluated_content}", images, href)
+            if not result_of_post:
+                print(f"Failed to post article '{title}' to Telegram.")
+                continue
+        time.sleep(600)
     print("Job finished.")
 
 
