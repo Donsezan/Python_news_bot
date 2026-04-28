@@ -97,6 +97,10 @@ def job(dry_run=False):
         print("Summarizing with emojis...")
         evaluated_content = _with_retry(lambda: ai_service.summarize_with_emojis(main_content, target_language='en'))
 
+        if evaluated_content is None:
+            print(f"Failed to summarize article '{title}' with emojis. Skipping.")
+            continue
+
         if not dry_run:
             print("Posting to Telegram...")
             result_of_post = telegram_service.post_to_telegram(f"<b>{title}</b>\n\n{evaluated_content}", images, href)
