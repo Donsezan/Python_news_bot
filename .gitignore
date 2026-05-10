@@ -1,4 +1,52 @@
+# Environment & secrets
 .env
-.venv
-__pycache__
+.env.*
+!.env.example
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# Database & vector store
+*.sqlite
+*.sqlite3
+*.db
 chroma_db_persistence/
+
+# Logs
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE & editor configs
+.vscode/
+.idea/
+*.iml
+
+# Claude Code internals
+.claude/
+CLAUDE.md
+
+# Testing & coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
