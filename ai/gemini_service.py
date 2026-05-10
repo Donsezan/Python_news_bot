@@ -1,24 +1,30 @@
-import google.generativeai as genai
+import requests
 from ai.base_ai_service import BaseAIService
 import ai.ai_prompts as ai_prompts
 import response_parser
 
+_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
+
+
 class GeminiService(BaseAIService):
     def __init__(self, api_key):
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        self.api_key = api_key
+
+    def _generate(self, prompt, json_mode=False):
+        body = {"contents": [{"parts": [{"text": prompt}]}]}
+        if json_mode:
+            body["generationConfig"] = {"responseMimeType": "application/json"}
+        resp = requests.post(f"{_API_URL}?key={self.api_key}", json=body)
+        resp.raise_for_status()
+        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
 
     def summarize_with_emojis(self, article_text, target_language='en'):
         prompt = ai_prompts.get_summarize_with_emojis_prompt(target_language)
-        full_prompt = f"{prompt}\n\n{article_text}"
-
-
-        response = self.model.generate_content(full_prompt)
-        summary = response.text
-        return response_parser.parse_summary_with_emojis(summary)
+        text = self._generate(f"{prompt}\n\n{article_text}")
+        return response_parser.parse_summary_with_emojis(text)
 
     def evaluate_article(self, article_text):
-        prompt = ai_prompts.get_evaluate_article_prompt()    
+        prompt = ai_prompts.get_evaluate_article_prompt()
         response_format = {
             "type": "json_schema",
             "json_schema": {
@@ -37,16 +43,7 @@ class GeminiService(BaseAIService):
                 }
             }
         }
-        full_prompt = (
-                    f"{prompt} Provide a JSON response with the following schema: {response_format}"                    
-                    f"\n\n{article_text}"
-                )
-        response = self.model.generate_content(
-            full_prompt,
-            generation_config={
-                "response_mime_type": "application/json"
-            }
-        )
-
-        print(response.text)
-        return response_parser.parse_evaluate_article(response.text)
+        full_prompt = f"{prompt} Provide a JSON response with the following schema: {response_format}\n\n{article_text}"
+        text = self._generate(full_prompt, json_mode=True)
+        print(text)
+        return response_parser.parse_evaluate_article(text)

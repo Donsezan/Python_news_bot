@@ -1,4 +1,93 @@
-"# AI_Python" 
+# Python News Bot
 
- Note:
- - source .venv/bin/activate
+A news aggregation bot that scrapes local Málaga news, evaluates article relevance with AI, and posts curated summaries to a Telegram channel. Runs on a schedule.
+
+## How It Works
+
+1. **Fetch** — Scrapes article links and content from the configured news source
+2. **Deduplicate** — Skips articles already seen using SQLite-backed storage
+3. **Evaluate** — AI scores each article's relevance (0–10); articles below 6 are skipped
+4. **Summarize** — AI generates an emoji-rich, Telegram-ready summary
+5. **Post** — Sends media groups (up to 9 images) or plain text to the Telegram channel
+6. **Cleanup** — Daily job removes articles older than 10 days
+
+## Setup
+
+### Prerequisites
+
+- Python 3.10+
+- A Telegram bot token and target chat/channel ID
+- A Google Gemini API key (or an OpenAI-compatible endpoint)
+
+### Install
+
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install google-generativeai openai chromadb beautifulsoup4 requests python-dotenv python-telegram-bot
+```
+
+### Configure
+
+Create a `.env` file in the project root:
+
+```env
+BOT_TOKEN=your_telegram_bot_token
+CHAT_ID=your_telegram_chat_id
+NEWS_URL=https://www.malagahoy.es/malaga/
+GEMINI_API_KEY=your_gemini_api_key
+```
+
+## Usage
+
+```bash
+# Run the bot (loops every 10 minutes)
+python main.py
+
+# Dry run — fetch and evaluate without saving or posting
+python main.py --dry-run
+```
+
+## AI Providers
+
+The bot supports two providers, switchable via `current_ai_provider` in [main.py](main.py):
+
+| Provider | Model | Notes |
+|---|---|---|
+| `AIProvider.GEMINI` | `gemini-2.0-flash` | Default; uses JSON schema validation |
+| `AIProvider.OPENAI` | Any OpenAI-compatible | Also works with local LM Studio at `http://localhost:1234/v1` |
+
+## Project Structure
+
+```
+├── main.py                  # Entry point, scheduler, job orchestration
+├── fetching_data.py         # Web scraping (BeautifulSoup)
+├── data_service.py          # SQLite deduplication layer
+├── telegram_service.py      # Telegram posting (media groups + text)
+├── response_parser.py       # JSON + regex extraction from AI responses
+└── ai/
+    ├── ai_service.py        # Factory: AIService.get_service(provider)
+    ├── base_ai_service.py   # Abstract base (evaluate, summarize)
+    ├── gemini_service.py    # Google Gemini implementation
+    ├── openai_service.py    # OpenAI / LM Studio implementation
+    ├── ai_prompts.py        # Prompt templates
+    └── ai_provider.py       # AIProvider enum
+```
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -p "test_*.py"   # All tests
+python -m unittest tests.test_ai_services              # AI services only
+```
+
+Tests use `unittest.mock` to mock all external API calls — no live credentials required.
+
+## Key Constants
+
+| Constant | Default | Description |
+|---|---|---|
+| `SIMILARITY_THRESHOLD` | `0.85` | Cosine similarity cutoff for deduplication |
+| Scheduler interval | 10 min | How often `job()` runs |
+| Cleanup age | 10 days | Max age of stored articles |
+| AI retry delay | 3 min | Wait between LLM retries (3 attempts max) |

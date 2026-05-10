@@ -5,8 +5,15 @@ class TelegramService:
         self.bot_token = BOT_TOKEN
         self.chat_id = CHAT_ID
 
+    CAPTION_LIMIT = 1024
+
     def post_to_telegram(self, message_text, images, href):
-        message_text = message_text + f"\n\n{href}"
+        url_suffix = f"\n\n{href}"
+        if images:
+            max_summary = self.CAPTION_LIMIT - len(url_suffix)
+            if len(message_text) > max_summary:
+                message_text = message_text[:max_summary - 1] + "…"
+        message_text = message_text + url_suffix
         if images:
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMediaGroup"
             mediaGroup = [

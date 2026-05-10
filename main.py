@@ -1,8 +1,7 @@
-from dotenv import load_dotenv
-import schedule
-import time
 import os
-from datetime import datetime
+import sys
+import time
+from datetime import datetime, timedelta, date
 
 from fetching_data import FetchingData
 from ai.ai_service import AIService
@@ -10,10 +9,22 @@ from telegram_service import TelegramService
 from data_service import DataService
 from ai.ai_provider import AIProvider
 
-# Configuration
-load_dotenv()
+
+def _load_env():
+    try:
+        with open('.env') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, _, value = line.partition('=')
+                    os.environ.setdefault(key.strip(), value.strip().strip('"\''))
+    except FileNotFoundError:
+        pass
+
+
+_load_env()
 HEADERS = {"User-Agent": "Mozilla/5.0"}
-CHROMA_DB_PATH = "./chroma_db_persistence"
+DB_PATH = "./news_bot.db"
 SIMILARITY_THRESHOLD = 0.85
 DISTANCE_THRESHOLD = 1 - SIMILARITY_THRESHOLD
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -21,21 +32,35 @@ CHAT_ID = os.getenv('CHAT_ID')
 NEWS_URL = os.getenv('NEWS_URL')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
+_missing = [k for k, v in {'BOT_TOKEN': BOT_TOKEN, 'CHAT_ID': CHAT_ID, 'NEWS_URL': NEWS_URL, 'GEMINI_API_KEY': GEMINI_API_KEY}.items() if not v]
+if _missing:
+    raise EnvironmentError(f"Missing required environment variables: {', '.join(_missing)}")
+
 # Toggle between AI providers: AIProvider.OPENAI or AIProvider.GEMINI
 current_ai_provider = AIProvider.GEMINI
 
 # Initialize services
-data_service = DataService(chroma_db_path=CHROMA_DB_PATH, DISTANCE_THRESHOLD=DISTANCE_THRESHOLD)
-fetch_serice = FetchingData(NEWS_URL, HEADERS)
+data_service = DataService(db_path=DB_PATH, DISTANCE_THRESHOLD=DISTANCE_THRESHOLD)
+fetch_service = FetchingData(NEWS_URL, HEADERS)
 telegram_service = TelegramService(BOT_TOKEN, CHAT_ID)
 ai_service = AIService.get_service(provider=current_ai_provider, gemini_api_key=GEMINI_API_KEY)
 
-def job(dry_run = False):
-    """
-    This function fetches new articles, evaluates them, and posts them to Telegram if they meet the criteria.
-    """
+
+def _with_retry(fn, retries=3, delay=180):
+    for attempt in range(1, retries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            print(f"LLM error (attempt {attempt}/{retries}): {e}")
+            if attempt < retries:
+                print(f"Retrying in {delay}s...")
+                time.sleep(delay)
+    return None
+
+
+def job(dry_run=False):
     print("Fetching latest articles...")
-    new_articles = fetch_serice.fetch_latest_articles()
+    new_articles = fetch_service.fetch_latest_articles()
     print(f"Found {len(new_articles)} new articles.")
     for title, href in new_articles:
         print(f"Processing article: {title}")
@@ -44,7 +69,7 @@ def job(dry_run = False):
             continue
 
         print("Fetching and summarizing article...")
-        result = fetch_serice.fetch_and_summarize(title, href)
+        result = fetch_service.fetch_and_summarize(title, href)
         if not result:
             print("Failed to fetch and summarize article.")
             continue
@@ -54,13 +79,12 @@ def job(dry_run = False):
             print("Article content or date/time is missing.")
             continue
 
-        if dry_run == False:
+        if not dry_run:
             print("Saving article...")
             data_service.save_article(title, date_time)
-     
 
         print("Evaluating article...")
-        article_score = ai_service.evaluate_article(title)
+        article_score = _with_retry(lambda: ai_service.evaluate_article(title))
         if not article_score:
             print(f"Failed to evaluate article '{title}'. Skipping.")
             continue
@@ -71,26 +95,44 @@ def job(dry_run = False):
             continue
 
         print("Summarizing with emojis...")
-        evaluated_content = ai_service.summarize_with_emojis(main_content, target_language='en')
+        evaluated_content = _with_retry(lambda: ai_service.summarize_with_emojis(main_content, target_language='en'))
 
-        if dry_run == False:
+        if evaluated_content is None:
+            print(f"Failed to summarize article '{title}' with emojis. Skipping.")
+            continue
+
+        if not dry_run:
             print("Posting to Telegram...")
             result_of_post = telegram_service.post_to_telegram(f"<b>{title}</b>\n\n{evaluated_content}", images, href)
             if not result_of_post:
                 print(f"Failed to post article '{title}' to Telegram.")
                 continue
+        time.sleep(600)
     print("Job finished.")
 
-# Main execution
+
 if __name__ == "__main__":
-    # Uncomment to test without posting
-    job(dry_run = False)  # Run once immediately
+    dry_run = '--dry-run' in sys.argv
+    job(dry_run=dry_run)
+    if dry_run:
+        sys.exit(0)
 
-    #Schedule regular jobs
-    schedule.every(10).minutes.do(lambda: job(dry_run=False))
-    schedule.every().day.at("00:00").do(data_service.cleanup_old_articles, max_age_days=10)
+    next_job = datetime.now() + timedelta(minutes=10)
+    last_cleanup_day = date.today()
 
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
-        print(f"All done for {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    try:
+        while True:
+            time.sleep(60)
+            now = datetime.now()
+            print(f"All done for {now.strftime('%Y-%m-%d %H:%M:%S')}")
+
+            if now.date() > last_cleanup_day:
+                data_service.cleanup_old_articles(max_age_days=10)
+                last_cleanup_day = now.date()
+
+            if now >= next_job:
+                job(dry_run=False)
+                next_job = now + timedelta(minutes=10)
+    except KeyboardInterrupt:
+        print("Shutting down gracefully.")
+        sys.exit(0)
