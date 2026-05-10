@@ -120,15 +120,19 @@ if __name__ == "__main__":
     next_job = datetime.now() + timedelta(minutes=10)
     last_cleanup_day = date.today()
 
-    while True:
-        time.sleep(60)
-        now = datetime.now()
-        print(f"All done for {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    try:
+        while True:
+            time.sleep(60)
+            now = datetime.now()
+            print(f"All done for {now.strftime('%Y-%m-%d %H:%M:%S')}")
 
-        if now.date() > last_cleanup_day:
-            data_service.cleanup_old_articles(max_age_days=10)
-            last_cleanup_day = now.date()
+            if now.date() > last_cleanup_day:
+                data_service.cleanup_old_articles(max_age_days=10)
+                last_cleanup_day = now.date()
 
-        if now >= next_job:
-            job(dry_run=False)
-            next_job = now + timedelta(minutes=10)
+            if now >= next_job:
+                job(dry_run=False)
+                next_job = now + timedelta(minutes=10)
+    except KeyboardInterrupt:
+        print("Shutting down gracefully.")
+        sys.exit(0)
