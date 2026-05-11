@@ -12,7 +12,7 @@ class OpenAIService(BaseAIService):
 
     def _chat(self, messages, response_format={"type": "text"}, model="microsoft/phi-4-reasoning-plus"):
         body = {"model": model, "messages": messages, "response_format": response_format, "temperature": 0.7}
-        resp = requests.post(_API_URL, json=body, headers=self.headers)
+        resp = requests.post(_API_URL, json=body, headers=self.headers, timeout=120)
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
 

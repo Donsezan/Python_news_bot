@@ -1,13 +1,13 @@
 # Python News Bot
 
-A news aggregation bot that scrapes local Málaga news, evaluates article relevance with AI, and posts curated summaries to a Telegram channel. Runs on a schedule.
+A news aggregation bot that scrapes local Málaga news, evaluates article relevance with AI, and posts curated summaries to a Telegram channel. Runs on a 10-minute schedule.
 
 ## How It Works
 
 1. **Fetch** — Scrapes article links and content from the configured news source
-2. **Deduplicate** — Skips articles already seen using SQLite-backed storage
-3. **Evaluate** — AI scores each article's relevance (0–10); articles below 6 are skipped
-4. **Summarize** — AI generates an emoji-rich, Telegram-ready summary
+2. **Deduplicate** — Embeds each title with Cohere and compares cosine similarity against Supabase-stored embeddings; falls back to Jaccard on legacy rows
+3. **Evaluate** — Gemini scores each article's relevance (0–10); articles below 6 are skipped
+4. **Summarize** — Gemini generates an emoji-rich, Telegram-ready summary
 5. **Post** — Sends media groups (up to 9 images) or plain text to the Telegram channel
 6. **Cleanup** — Daily job removes articles older than 10 days
 
@@ -17,14 +17,24 @@ A news aggregation bot that scrapes local Málaga news, evaluates article releva
 
 - Python 3.10+
 - A Telegram bot token and target chat/channel ID
-- A Google Gemini API key (or an OpenAI-compatible endpoint)
+- A Google Gemini API key (for article evaluation and summarization)
+- A Cohere API key (for title embeddings / deduplication)
+- A [Supabase](https://supabase.com) project with an `articles` table:
+  ```sql
+  create table articles (
+    id uuid primary key,
+    title text,
+    date text,
+    embedding jsonb
+  );
+  ```
 
 ### Install
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install google-generativeai openai chromadb beautifulsoup4 requests python-dotenv python-telegram-bot
+pip install -r requirements.txt
 ```
 
 ### Configure
@@ -36,6 +46,9 @@ BOT_TOKEN=your_telegram_bot_token
 CHAT_ID=your_telegram_chat_id
 NEWS_URL=https://www.malagahoy.es/malaga/
 GEMINI_API_KEY=your_gemini_api_key
+COHERE_API_KEY=your_cohere_api_key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your_supabase_anon_or_service_key
 ```
 
 ## Usage
@@ -50,21 +63,24 @@ python main.py --dry-run
 
 ## AI Providers
 
-The bot supports two providers, switchable via `current_ai_provider` in [main.py](main.py):
+Article evaluation and summarization use Gemini by default. Switch via `current_ai_provider` in [main.py](main.py):
 
 | Provider | Model | Notes |
 |---|---|---|
 | `AIProvider.GEMINI` | `gemini-2.0-flash` | Default; uses JSON schema validation |
 | `AIProvider.OPENAI` | Any OpenAI-compatible | Also works with local LM Studio at `http://localhost:1234/v1` |
 
+Deduplication embeddings always use Cohere (`embed-multilingual-v3.0`, 1024 dimensions).
+
 ## Project Structure
 
 ```
 ├── main.py                  # Entry point, scheduler, job orchestration
 ├── fetching_data.py         # Web scraping (BeautifulSoup)
-├── data_service.py          # SQLite deduplication layer
+├── data_service.py          # Supabase deduplication (Cohere embeddings + cosine similarity)
 ├── telegram_service.py      # Telegram posting (media groups + text)
 ├── response_parser.py       # JSON + regex extraction from AI responses
+├── requirements.txt
 └── ai/
     ├── ai_service.py        # Factory: AIService.get_service(provider)
     ├── base_ai_service.py   # Abstract base (evaluate, summarize)
@@ -77,17 +93,23 @@ The bot supports two providers, switchable via `current_ai_provider` in [main.py
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"   # All tests
-python -m unittest tests.test_ai_services              # AI services only
+python -m unittest discover -s tests -p "test_*.py"        # All tests
+python -m unittest tests.test_ai_services                   # AI service (evaluate + summarize)
+python -m unittest tests.test_similarity                    # Cosine math + Cohere embedding + Supabase integration
+python -m unittest tests.test_supabase_connection           # Live Supabase connection (requires credentials)
 ```
 
-Tests use `unittest.mock` to mock all external API calls — no live credentials required.
+Unit tests mock all external API calls — no live credentials required for most tests.  
+`test_similarity.py` runs real Cohere API calls when `COHERE_API_KEY` is set; otherwise the API-dependent classes are skipped automatically.  
+`test_supabase_connection.py` hits the live Supabase REST API and requires `SUPABASE_URL` and `SUPABASE_KEY`.
 
 ## Key Constants
 
 | Constant | Default | Description |
 |---|---|---|
 | `SIMILARITY_THRESHOLD` | `0.85` | Cosine similarity cutoff for deduplication |
+| `DISTANCE_THRESHOLD` | `0.15` | `1 - SIMILARITY_THRESHOLD` |
 | Scheduler interval | 10 min | How often `job()` runs |
 | Cleanup age | 10 days | Max age of stored articles |
 | AI retry delay | 3 min | Wait between LLM retries (3 attempts max) |
+| Embedding model | `embed-multilingual-v3.0` | Cohere model, 1024 dimensions |

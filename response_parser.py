@@ -1,16 +1,15 @@
 import re
 import json
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def parse_summary_with_emojis(response_text):
-    """
-    Cleans the summary text by removing any <think> tags.
-    """
     return re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
 
+
 def parse_summary_with_emojis_and_evaluate(response_text):
-    """
-    Parses the response for a summary with evaluation, extracting the summary text and scores.
-    """
     cleaned_response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
 
     scores = {"expat_impact": 0, "malaga_relevance": 0, "feature_vs_politics": 0}
@@ -24,9 +23,9 @@ def parse_summary_with_emojis_and_evaluate(response_text):
             scores["feature_vs_politics"] = int(scores_match.group(3))
             summary_text = re.sub(r"Scores:\s*E:\d{1,2}\s*M:\d{1,2}\s*P:\d{1,2}", "", cleaned_response_text, flags=re.IGNORECASE).strip()
         except ValueError:
-            print(f"Warning: Could not parse scores from AI response: {scores_match.groups()}")
+            logger.warning(f"Could not parse scores from AI response: {scores_match.groups()}")
     else:
-        print(f"Warning: Scores pattern not found in AI response: '{cleaned_response_text}'")
+        logger.warning(f"Scores pattern not found in AI response: '{cleaned_response_text}'")
 
     expat_impact = scores.get("expat_impact", 0)
     malaga_relevance = scores.get("malaga_relevance", 0)
@@ -35,15 +34,13 @@ def parse_summary_with_emojis_and_evaluate(response_text):
 
     return summary_text, final_score
 
+
 def parse_evaluate_article(response_text):
-    """
-    Parses the JSON response from the article evaluation, calculating a total score.
-    """
     cleaned_response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
     cleaned_response_text = re.sub(r'//.*', '', cleaned_response_text)
 
-    if "json" in cleaned_response_text:
-        cleaned_response_text = cleaned_response_text.strip('```json\n').strip('```').strip()
+    cleaned_response_text = re.sub(r'^```(?:json)?\s*', '', cleaned_response_text)
+    cleaned_response_text = re.sub(r'\s*```$', '', cleaned_response_text).strip()
 
     try:
         json_object = json.loads(cleaned_response_text)
@@ -58,5 +55,5 @@ def parse_evaluate_article(response_text):
         total_score = sum(non_zero_scores) / len(non_zero_scores) if non_zero_scores else 0
         return total_score
     except json.JSONDecodeError:
-        print(f"Failed to decode JSON from response: {cleaned_response_text}")
+        logger.error(f"Failed to decode JSON from response: {cleaned_response_text}")
         return 0

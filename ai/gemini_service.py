@@ -1,9 +1,14 @@
+import os
+import logging
 import requests
 from ai.base_ai_service import BaseAIService
 import ai.ai_prompts as ai_prompts
 import response_parser
 
-_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
+logger = logging.getLogger(__name__)
+
+_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{_MODEL}:generateContent"
 
 
 class GeminiService(BaseAIService):
@@ -14,9 +19,25 @@ class GeminiService(BaseAIService):
         body = {"contents": [{"parts": [{"text": prompt}]}]}
         if json_mode:
             body["generationConfig"] = {"responseMimeType": "application/json"}
-        resp = requests.post(f"{_API_URL}?key={self.api_key}", json=body)
+        resp = requests.post(f"{_API_URL}?key={self.api_key}", json=body, timeout=60)
         resp.raise_for_status()
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        data = resp.json()
+
+        candidates = data.get("candidates") or []
+        if not candidates:
+            reason = (data.get("promptFeedback") or {}).get("blockReason", "no candidates")
+            raise RuntimeError(f"Gemini returned no candidates: {reason}")
+
+        cand = candidates[0]
+        finish = cand.get("finishReason")
+        if finish and finish not in ("STOP", "MAX_TOKENS"):
+            raise RuntimeError(f"Gemini finishReason={finish}")
+
+        parts = ((cand.get("content") or {}).get("parts")) or []
+        text = "".join(p.get("text", "") for p in parts).strip()
+        if not text:
+            raise RuntimeError("Gemini returned empty text")
+        return text
 
     def summarize_with_emojis(self, article_text, target_language='en'):
         prompt = ai_prompts.get_summarize_with_emojis_prompt(target_language)
@@ -45,5 +66,5 @@ class GeminiService(BaseAIService):
         }
         full_prompt = f"{prompt} Provide a JSON response with the following schema: {response_format}\n\n{article_text}"
         text = self._generate(full_prompt, json_mode=True)
-        print(text)
+        logger.debug(f"Gemini evaluate response: {text}")
         return response_parser.parse_evaluate_article(text)
