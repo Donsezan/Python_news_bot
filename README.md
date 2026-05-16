@@ -67,7 +67,7 @@ Article evaluation and summarization use Gemini by default. Switch via `current_
 
 | Provider | Model | Notes |
 |---|---|---|
-| `AIProvider.GEMINI` | `gemini-2.0-flash` | Default; uses JSON schema validation |
+| `AIProvider.GEMINI` | `gemini-2.5-flash` | Default; uses JSON schema validation |
 | `AIProvider.OPENAI` | Any OpenAI-compatible | Also works with local LM Studio at `http://localhost:1234/v1` |
 
 Deduplication embeddings always use Cohere (`embed-multilingual-v3.0`, 1024 dimensions).

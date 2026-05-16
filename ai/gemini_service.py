@@ -7,7 +7,7 @@ import response_parser
 
 logger = logging.getLogger(__name__)
 
-_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 _API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{_MODEL}:generateContent"
 
 
